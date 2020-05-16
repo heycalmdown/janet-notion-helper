@@ -8,40 +8,42 @@
                 (slice id 16 20)
                 (slice id 20)] "-"))
 
-# function dashToId(id) {
-#   return id.replace(/-/g, '');
-# }
+(defn dash->id [dashed] (string/replace-all "-" "" dashed))
 
-(defn req->loadPageChunk [pageId] 
-  (string (json/encode @{ :pageId pageId :limit 20 :chunkNumber 0 :verticalColumns false })))
+(defn stringify [ds] (string (json/encode ds)))
 
-(defn req->queryCollection [ids] 
-  (string (json/encode @{ :collectionId (first ids) :collectionViewId (get ids 1) :loader @{ :limit 500 :type "table" } })))
+(defn req->loadPageChunk [page-id] (stringify @{ :pageId page-id :limit 20 :chunkNumber 0 :verticalColumns false }))
 
-(defn headers [token] (merge {"cookie" (string "token_v2=" token)} {
+(defn req->queryCollection [ids] (stringify @{ :collectionId (first ids) :collectionViewId (get ids 1) :loader @{ :limit 500 :type "table" } }))
+
+(defn headers [token] {
   "accept" "*/*"
   "accept-language" "en-US:en;q=0.9"
+  "cookie" (string "token_v2=" token)
   "origin" "https://www.notion.so"
   "referer" "https://www.notion.so"
   "user-agent" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36"
   # "accept-encoding" "gzip"
   "content-type" "application/json"
-}))
+})
 
-(defn loadPageChunk! [token tableId] 
-  (json/decode ((http/post "https://www.notion.so/api/v3/loadPageChunk" (req->loadPageChunk (id->dash tableId)) :headers (headers token)) :body))
-)
+(defn assert-200 [res] (if (= (res :status) 200) res (assert false (res :body))))
 
-(defn queryCollection! [token ids] 
-  (json/decode ((http/post "https://www.notion.so/api/v3/queryCollection" (req->queryCollection ids) :headers (headers token)) :body))
-)
+(defn post! [token api body] (->
+  (http/post (string "https://www.notion.so/api/v3/" api) body :headers (headers token))
+  (assert-200)
+  (get :body)
+  (json/decode)))
+
+(defn loadPageChunk! [token page-id] (post! token "loadPageChunk" (req->loadPageChunk page-id)))
+
+(defn queryCollection! [token ids] (post! token "queryCollection" (req->queryCollection ids)))
 
 (defn collection-ids [obj]
-  [
-    (-> (get obj "recordMap") (get "collection") (keys) (first))
-    (-> (get obj "recordMap") (get "collection_view") (keys) (first))
-  ]
-)
+  (let [record-map (get obj "recordMap")] [
+    (-> record-map (get "collection") (keys) (first))
+    (-> record-map (get "collection_view") (keys) (first))
+  ]))
 
 (defn collection-blocks [obj] (-> obj (get "recordMap") (get "block")))
 
@@ -50,8 +52,8 @@
 (defn main [&]
   (let [env (os/environ)
     NOTION_TOKEN (get env "NOTION_TOKEN")
-    TABLEID (get env "TABLEID")]
-    (->> (loadPageChunk! NOTION_TOKEN TABLEID)
+    PAGE_ID (get env "PAGE_ID")]
+    (->> (loadPageChunk! NOTION_TOKEN (id->dash PAGE_ID))
       (collection-ids)
       (queryCollection! NOTION_TOKEN)
       (collection-blocks)
@@ -59,5 +61,4 @@
       (map title)
       (filter (comp not nil?))
       (map print)
-      # (length)
     )))
